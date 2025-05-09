@@ -1,122 +1,86 @@
 <?php
 session_start();
-require 'conexao.php';
+include("conexao.php");
 
 // Verifica se o usuário está logado
-if (!isset($_SESSION["usuario_id"])) {
+if(!isset($_SESSION['id_usuario'])) {
     header("Location: login.php");
     exit;
 }
 
-$erro = "";
-$sucesso = "";
-
-// Função para validar CPF
-function validaCPF($cpf) {
-    // Remove caracteres especiais do CPF
-    $cpf = preg_replace('/[^0-9]/', '', $cpf);
-    
-    // Verifica se o CPF tem 11 dígitos
-    if (strlen($cpf) != 11) {
-        return false;
-    }
-    
-    // Verifica se todos os dígitos são iguais
-    if (preg_match('/^(\d)\1+$/', $cpf)) {
-        return false;
-    }
-    
-    // Calcula o primeiro dígito verificador
-    $soma = 0;
-    for ($i = 0; $i < 9; $i++) {
-        $soma += ($cpf[$i] * (10 - $i));
-    }
-    $resto = $soma % 11;
-    $dv1 = ($resto < 2) ? 0 : 11 - $resto;
-    
-    // Calcula o segundo dígito verificador
-    $soma = 0;
-    for ($i = 0; $i < 10; $i++) {
-        $soma += ($cpf[$i] * (11 - $i));
-    }
-    $resto = $soma % 11;
-    $dv2 = ($resto < 2) ? 0 : 11 - $resto;
-    
-    // Verifica se os dígitos verificadores estão corretos
-    return ($cpf[9] == $dv1 && $cpf[10] == $dv2);
+// Função para sanitizar input
+function sanitize($data) {
+    $data = trim($data);
+    $data = stripslashes($data);
+    $data = htmlspecialchars($data);
+    return $data;
 }
 
-// Verifica se foi enviado o formulário
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $nome = htmlspecialchars($_POST["nome"]);
-    $email = filter_var($_POST["email"], FILTER_SANITIZE_EMAIL);
-    $telefone = htmlspecialchars($_POST["telefone"]);
-    $cpf = preg_replace('/[^0-9]/', '', $_POST["cpf"]);
-    $rg = htmlspecialchars($_POST["rg"]);
+// Configurações para upload de documentos
+$diretorioUpload = "uploads/documentos/";
+if (!file_exists($diretorioUpload)) {
+    mkdir($diretorioUpload, 0777, true);
+}
+
+$mensagem = "";
+$tipo_mensagem = "";
+
+// Processamento do formulário quando enviado
+if(isset($_POST['salvar'])) {
+    $nome = sanitize($_POST['nome']);
+    $cpf = sanitize($_POST['cpf']);
+    $cnpj = sanitize($_POST['cnpj']);
+    $email = sanitize($_POST['email']);
+    $rg = sanitize($_POST['rg']);
+    $data_nascimento = sanitize($_POST['data_nascimento']);
+    $cep = sanitize($_POST['cep']);
+    $rua = sanitize($_POST['rua']);
+    $numero = sanitize($_POST['numero']);
+    $bairro = sanitize($_POST['bairro']);
+    $cidade = sanitize($_POST['cidade']);
+    $estado = sanitize($_POST['estado']);
+    $estado_civil = sanitize($_POST['estado_civil']);
     
-    // Dados de endereço
-    $cep = preg_replace('/[^0-9]/', '', $_POST["cep"]);
-    $logradouro = htmlspecialchars($_POST["logradouro"]);
-    $numero = htmlspecialchars($_POST["numero"]);
-    $complemento = htmlspecialchars($_POST["complemento"]);
-    $bairro = htmlspecialchars($_POST["bairro"]);
-    $cidade = htmlspecialchars($_POST["cidade"]);
-    $estado = htmlspecialchars($_POST["estado"]);
-    
-    // Monta o endereço completo
-    $endereco = "$logradouro, $numero";
-    if (!empty($complemento)) {
-        $endereco .= ", $complemento";
-    }
-    $endereco .= " - $bairro - $cidade/$estado - CEP: $cep";
-    
-    // Validação do CPF
-    if (!empty($cpf) && !validaCPF($cpf)) {
-        $erro = "CPF inválido. Por favor, verifique e tente novamente.";
+    // Validação dos campos obrigatórios
+    if(empty($nome) || empty($email) || empty($cep) || empty($cidade) || empty($estado)) {
+        $mensagem = "Por favor, preencha todos os campos obrigatórios!";
+        $tipo_mensagem = "erro";
     } else {
-        // Formatação do CPF para exibição
-        if (!empty($cpf)) {
-            $cpf = substr($cpf, 0, 3) . '.' . substr($cpf, 3, 3) . '.' . substr($cpf, 6, 3) . '-' . substr($cpf, 9, 2);
-        }
-        
-        // Upload do anexo
-        $anexo = null;
-        if (!empty($_FILES["anexo"]["name"])) {
-            $pasta = "uploads/";
+        // Processamento do upload de documento (se houver)
+        $documento_path = "";
+        if(isset($_FILES['documento']) && $_FILES['documento']['error'] == 0) {
+            $arquivo_tmp = $_FILES['documento']['tmp_name'];
+            $nomeArquivo = $_FILES['documento']['name'];
+            $novoNome = uniqid() . '-' . $nomeArquivo;
             
-            // Cria a pasta se não existir
-            if (!file_exists($pasta)) {
-                mkdir($pasta, 0777, true);
-            }
-            
-            $nome_arquivo = uniqid() . "-" . basename($_FILES["anexo"]["name"]);
-            $destino = $pasta . $nome_arquivo;
-            
-            // Verifica o tipo de arquivo (opcional)
-            $tipo_arquivo = strtolower(pathinfo($destino, PATHINFO_EXTENSION));
-            $tipos_permitidos = array("jpg", "jpeg", "png", "pdf", "doc", "docx");
-            
-            if (!in_array($tipo_arquivo, $tipos_permitidos)) {
-                $erro = "Apenas arquivos JPG, JPEG, PNG, PDF, DOC e DOCX são permitidos.";
+            // Move o arquivo para o diretório de uploads
+            if(move_uploaded_file($arquivo_tmp, $diretorioUpload.$novoNome)) {
+                $documento_path = $diretorioUpload.$novoNome;
             } else {
-                // Faz o upload
-                if (move_uploaded_file($_FILES["anexo"]["tmp_name"], $destino)) {
-                    $anexo = $destino;
-                } else {
-                    $erro = "Erro ao fazer upload do anexo.";
-                }
+                $mensagem = "Erro ao fazer upload do documento!";
+                $tipo_mensagem = "erro";
             }
         }
         
-        // Se não houver erro, insere no banco de dados
-        if (empty($erro)) {
-            try {
-                $stmt = $pdo->prepare("INSERT INTO clientes (nome, email, telefone, endereco, rg, cpf, anexo, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$nome, $email, $telefone, $endereco, $rg, $cpf, $anexo, $_SESSION["usuario_id"]]);
-                $sucesso = "Cliente cadastrado com sucesso!";
-            } catch (PDOException $e) {
-                $erro = "Erro ao cadastrar cliente: " . $e->getMessage();
+        // Se não houve erro no upload, continua com a inserção no banco
+        if($tipo_mensagem != "erro") {
+            // Preparar a query com prepared statements
+            $stmt = $mysqli->prepare("INSERT INTO clientes (nome, cpf, cnpj, email, rg, data_nascimento, cep, rua, numero, bairro, cidade, estado, estado_civil, documento_path, id_usuario) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            
+            $stmt->bind_param("ssssssssssssssi", $nome, $cpf, $cnpj, $email, $rg, $data_nascimento, $cep, $rua, $numero, $bairro, $cidade, $estado, $estado_civil, $documento_path, $_SESSION['id_usuario']);
+            
+            if($stmt->execute()) {
+                $mensagem = "Cliente cadastrado com sucesso!";
+                $tipo_mensagem = "sucesso";
+                
+                // Limpar os campos após cadastro bem-sucedido
+                $nome = $cpf = $cnpj = $email = $rg = $data_nascimento = $cep = $rua = $numero = $bairro = $cidade = $estado = $estado_civil = "";
+            } else {
+                $mensagem = "Erro ao cadastrar cliente: " . $stmt->error;
+                $tipo_mensagem = "erro";
             }
+            
+            $stmt->close();
         }
     }
 }
@@ -127,298 +91,302 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cadastro de Cliente - Sistema MPHP</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css">
+    <title>Cadastro de Cliente</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .card {
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-top: 30px;
+            margin-bottom: 30px;
+        }
+        .card-header {
+            background-color: #fff;
+            border-radius: 15px 15px 0 0 !important;
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+        }
+        .card-title {
+            margin-bottom: 0;
+            font-weight: 600;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .card-body {
+            padding: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-control {
+            border-radius: 8px;
+            padding: 12px;
+            border: 1px solid #ced4da;
+        }
+        .form-control:focus {
+            box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+        }
+        .form-label {
+            font-weight: 500;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn {
+            padding: 12px 25px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+        .btn-primary {
+            background-color: #4e73df;
+            border-color: #4e73df;
+        }
+        .btn-secondary {
+            background-color: #858796;
+            border-color: #858796;
+        }
+        .alert {
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .file-upload-zone {
+            border: 2px dashed #ced4da;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .file-upload-zone:hover {
+            border-color: #4e73df;
+        }
+        .icon-container {
+            width: 20px;
+            display: inline-block;
+            text-align: center;
+            margin-right: 5px;
+        }
+    </style>
 </head>
 <body>
-    <div class="container mt-4">
-        <div class="row">
-            <div class="col-md-10 offset-md-1">
-                <div class="card">
-                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                        <h2 class="mb-0">Cadastro de Cliente</h2>
-                        <div>
-                            <a href="painel.php" class="btn btn-light btn-sm">Voltar ao Painel</a>
+    <div class="container">
+        <?php if($mensagem): ?>
+            <div class="alert alert-<?php echo $tipo_mensagem == 'sucesso' ? 'success' : 'danger'; ?> alert-dismissible fade show mt-3" role="alert">
+                <?php echo $mensagem; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        <?php endif; ?>
+        
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <i class="fas fa-user-plus"></i> Cadastro de Cliente
+                </h3>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" enctype="multipart/form-data">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="nome" class="form-label">
+                                <i class="fas fa-user icon-container"></i> Nome Completo
+                            </label>
+                            <input type="text" class="form-control" id="nome" name="nome" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="estado_civil" class="form-label">
+                                <i class="fas fa-heart icon-container"></i> Estado Civil
+                            </label>
+                            <select class="form-control form-select" id="estado_civil" name="estado_civil">
+                                <option value="">Selecione</option>
+                                <option value="Solteiro(a)">Solteiro(a)</option>
+                                <option value="Casado(a)">Casado(a)</option>
+                                <option value="Divorciado(a)">Divorciado(a)</option>
+                                <option value="Viúvo(a)">Viúvo(a)</option>
+                                <option value="União Estável">União Estável</option>
+                            </select>
                         </div>
                     </div>
-                    <div class="card-body">
-                        <?php if (!empty($erro)): ?>
-                            <div class="alert alert-danger"><?php echo $erro; ?></div>
-                        <?php endif; ?>
-                        
-                        <?php if (!empty($sucesso)): ?>
-                            <div class="alert alert-success"><?php echo $sucesso; ?></div>
-                        <?php endif; ?>
-                        
-                        <form method="POST" enctype="multipart/form-data">
-                            <div class="row mb-3">
-                                <div class="col-md-6">
-                                    <label for="nome" class="form-label">Nome Completo*</label>
-                                    <input type="text" class="form-control" id="nome" name="nome" required>
-                                </div>
-                                <div class="col-md-6">
-                                    <label for="email" class="form-label">E-mail*</label>
-                                    <input type="email" class="form-control" id="email" name="email" required>
-                                </div>
-                            </div>
-                            
-                            <div class="row mb-3">
-                                <div class="col-md-6">
-                                    <label for="telefone" class="form-label">Telefone</label>
-                                    <input type="text" class="form-control" id="telefone" name="telefone">
-                                </div>
-                                <div class="col-md-6">
-                                    <label for="cpf" class="form-label">CPF</label>
-                                    <input type="text" class="form-control" id="cpf" name="cpf">
-                                    <div id="cpfFeedback" class="invalid-feedback">
-                                        CPF inválido. Por favor, verifique.
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="mb-3">
-                                <label for="rg" class="form-label">RG</label>
-                                <input type="text" class="form-control" id="rg" name="rg">
-                            </div>
-                            
-                            <!-- Campos de Endereço -->
-                            <div class="card mb-3">
-                                <div class="card-header bg-light">
-                                    Endereço
-                                </div>
-                                <div class="card-body">
-                                    <div class="row mb-3">
-                                        <div class="col-md-4">
-                                            <label for="cep" class="form-label">CEP</label>
-                                            <div class="input-group">
-                                                <input type="text" class="form-control" id="cep" name="cep">
-                                                <button class="btn btn-outline-secondary" type="button" id="buscarCep">
-                                                    <i class="fas fa-search"></i>
-                                                </button>
-                                            </div>
-                                            <div id="cepFeedback" class="invalid-feedback">
-                                                CEP não encontrado.
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="row mb-3">
-                                        <div class="col-md-8">
-                                            <label for="logradouro" class="form-label">Logradouro</label>
-                                            <input type="text" class="form-control" id="logradouro" name="logradouro">
-                                        </div>
-                                        <div class="col-md-4">
-                                            <label for="numero" class="form-label">Número</label>
-                                            <input type="text" class="form-control" id="numero" name="numero">
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="row mb-3">
-                                        <div class="col-md-6">
-                                            <label for="complemento" class="form-label">Complemento</label>
-                                            <input type="text" class="form-control" id="complemento" name="complemento">
-                                        </div>
-                                        <div class="col-md-6">
-                                            <label for="bairro" class="form-label">Bairro</label>
-                                            <input type="text" class="form-control" id="bairro" name="bairro">
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="row mb-3">
-                                        <div class="col-md-8">
-                                            <label for="cidade" class="form-label">Cidade</label>
-                                            <input type="text" class="form-control" id="cidade" name="cidade">
-                                        </div>
-                                        <div class="col-md-4">
-                                            <label for="estado" class="form-label">Estado</label>
-                                            <select class="form-select" id="estado" name="estado">
-                                                <option value="">Selecione</option>
-                                                <option value="AC">Acre</option>
-                                                <option value="AL">Alagoas</option>
-                                                <option value="AP">Amapá</option>
-                                                <option value="AM">Amazonas</option>
-                                                <option value="BA">Bahia</option>
-                                                <option value="CE">Ceará</option>
-                                                <option value="DF">Distrito Federal</option>
-                                                <option value="ES">Espírito Santo</option>
-                                                <option value="GO">Goiás</option>
-                                                <option value="MA">Maranhão</option>
-                                                <option value="MT">Mato Grosso</option>
-                                                <option value="MS">Mato Grosso do Sul</option>
-                                                <option value="MG">Minas Gerais</option>
-                                                <option value="PA">Pará</option>
-                                                <option value="PB">Paraíba</option>
-                                                <option value="PR">Paraná</option>
-                                                <option value="PE">Pernambuco</option>
-                                                <option value="PI">Piauí</option>
-                                                <option value="RJ">Rio de Janeiro</option>
-                                                <option value="RN">Rio Grande do Norte</option>
-                                                <option value="RS">Rio Grande do Sul</option>
-                                                <option value="RO">Rondônia</option>
-                                                <option value="RR">Roraima</option>
-                                                <option value="SC">Santa Catarina</option>
-                                                <option value="SP">São Paulo</option>
-                                                <option value="SE">Sergipe</option>
-                                                <option value="TO">Tocantins</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="mb-3">
-                                <label for="anexo" class="form-label">Anexo (opcional)</label>
-                                <input type="file" class="form-control" id="anexo" name="anexo">
-                                <div class="form-text">Formatos aceitos: JPG, JPEG, PNG, PDF, DOC, DOCX</div>
-                            </div>
-                            
-                            <div class="d-grid gap-2">
-                                <button type="submit" class="btn btn-primary">Cadastrar Cliente</button>
-                            </div>
-                        </form>
+                    
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="cpf" class="form-label">
+                                <i class="fas fa-id-card icon-container"></i> CPF
+                            </label>
+                            <input type="text" class="form-control" id="cpf" name="cpf">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="cnpj" class="form-label">
+                                <i class="fas fa-building icon-container"></i> CNPJ
+                            </label>
+                            <input type="text" class="form-control" id="cnpj" name="cnpj">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="email" class="form-label">
+                                <i class="fas fa-envelope icon-container"></i> Email
+                            </label>
+                            <input type="email" class="form-control" id="email" name="email" required>
+                        </div>
                     </div>
-                </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="rg" class="form-label">
+                                <i class="fas fa-id-badge icon-container"></i> RG
+                            </label>
+                            <input type="text" class="form-control" id="rg" name="rg">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="data_nascimento" class="form-label">
+                                <i class="fas fa-calendar-alt icon-container"></i> Data de Nascimento
+                            </label>
+                            <input type="date" class="form-control" id="data_nascimento" name="data_nascimento" placeholder="dd/mm/aaaa">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="cep" class="form-label">
+                                <i class="fas fa-map-marker-alt icon-container"></i> CEP
+                            </label>
+                            <input type="text" class="form-control" id="cep" name="cep" required>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="rua" class="form-label">
+                                <i class="fas fa-road icon-container"></i> Rua
+                            </label>
+                            <input type="text" class="form-control" id="rua" name="rua" required>
+                        </div>
+                        <div class="col-md-2 mb-3">
+                            <label for="numero" class="form-label">
+                                <i class="fas fa-hashtag icon-container"></i> Número
+                            </label>
+                            <input type="text" class="form-control" id="numero" name="numero" required>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="bairro" class="form-label">
+                                <i class="fas fa-map icon-container"></i> Bairro
+                            </label>
+                            <input type="text" class="form-control" id="bairro" name="bairro" required>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="cidade" class="form-label">
+                                <i class="fas fa-city icon-container"></i> Cidade
+                            </label>
+                            <input type="text" class="form-control" id="cidade" name="cidade" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="estado" class="form-label">
+                                <i class="fas fa-map-signs icon-container"></i> Estado
+                            </label>
+                            <select class="form-control form-select" id="estado" name="estado" required>
+                                <option value="">Selecione</option>
+                                <option value="AC">Acre</option>
+                                <option value="AL">Alagoas</option>
+                                <option value="AP">Amapá</option>
+                                <option value="AM">Amazonas</option>
+                                <option value="BA">Bahia</option>
+                                <option value="CE">Ceará</option>
+                                <option value="DF">Distrito Federal</option>
+                                <option value="ES">Espírito Santo</option>
+                                <option value="GO">Goiás</option>
+                                <option value="MA">Maranhão</option>
+                                <option value="MT">Mato Grosso</option>
+                                <option value="MS">Mato Grosso do Sul</option>
+                                <option value="MG">Minas Gerais</option>
+                                <option value="PA">Pará</option>
+                                <option value="PB">Paraíba</option>
+                                <option value="PR">Paraná</option>
+                                <option value="PE">Pernambuco</option>
+                                <option value="PI">Piauí</option>
+                                <option value="RJ">Rio de Janeiro</option>
+                                <option value="RN">Rio Grande do Norte</option>
+                                <option value="RS">Rio Grande do Sul</option>
+                                <option value="RO">Rondônia</option>
+                                <option value="RR">Roraima</option>
+                                <option value="SC">Santa Catarina</option>
+                                <option value="SP">São Paulo</option>
+                                <option value="SE">Sergipe</option>
+                                <option value="TO">Tocantins</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <label for="documento" class="form-label">
+                                <i class="fas fa-file-alt icon-container"></i> Documentos
+                            </label>
+                            <div class="file-upload-zone" id="dropzone">
+                                <input type="file" name="documento" id="documento" class="d-none">
+                                <i class="fas fa-cloud-upload-alt fa-3x mb-3 text-muted"></i>
+                                <p class="mb-0">Clique para anexar documentos</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between">
+                        <button type="button" class="btn btn-secondary" onclick="window.location.href='painel.php'">
+                            <i class="fas fa-times"></i> Cancelar
+                        </button>
+                        <button type="submit" name="salvar" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Salvar Cliente
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
-    
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/js/all.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.mask/1.14.16/jquery.mask.min.js"></script>
     <script>
-        // Máscara para CPF
-        document.getElementById('cpf').addEventListener('input', function (e) {
-            let value = e.target.value.replace(/\D/g, '');
-            if (value.length > 11) value = value.slice(0, 11);
+        $(document).ready(function() {
+            // Máscaras para os campos
+            $('#cpf').mask('000.000.000-00');
+            $('#cnpj').mask('00.000.000/0000-00');
+            $('#cep').mask('00000-000');
             
-            if (value.length > 9) {
-                value = value.replace(/^(\d{3})(\d{3})(\d{3})/, '$1.$2.$3-');
-            } else if (value.length > 6) {
-                value = value.replace(/^(\d{3})(\d{3})/, '$1.$2.');
-            } else if (value.length > 3) {
-                value = value.replace(/^(\d{3})/, '$1.');
-            }
-            
-            e.target.value = value;
-        });
-        
-        // Máscara para telefone
-        document.getElementById('telefone').addEventListener('input', function (e) {
-            let value = e.target.value.replace(/\D/g, '');
-            if (value.length > 11) value = value.slice(0, 11);
-            
-            if (value.length > 10) {
-                value = value.replace(/^(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
-            } else if (value.length > 6) {
-                value = value.replace(/^(\d{2})(\d{4})/, '($1) $2-');
-            } else if (value.length > 2) {
-                value = value.replace(/^(\d{2})/, '($1) ');
-            }
-            
-            e.target.value = value;
-        });
-        
-        // Máscara para CEP
-        document.getElementById('cep').addEventListener('input', function (e) {
-            let value = e.target.value.replace(/\D/g, '');
-            if (value.length > 8) value = value.slice(0, 8);
-            
-            if (value.length > 5) {
-                value = value.replace(/^(\d{5})(\d{3})/, '$1-$2');
-            }
-            
-            e.target.value = value;
-        });
-        
-        // Validação do CPF em tempo real
-        document.getElementById('cpf').addEventListener('blur', function() {
-            const cpf = this.value.replace(/\D/g, '');
-            if (cpf.length === 11) {
-                if (!validarCPF(cpf)) {
-                    this.classList.add('is-invalid');
-                } else {
-                    this.classList.remove('is-invalid');
+            // Função para buscar CEP
+            $('#cep').blur(function() {
+                const cep = $(this).val().replace(/\D/g, '');
+                
+                if (cep.length === 8) {
+                    $.getJSON(`https://viacep.com.br/ws/${cep}/json/`, function(data) {
+                        if (!data.erro) {
+                            $('#rua').val(data.logradouro);
+                            $('#bairro').val(data.bairro);
+                            $('#cidade').val(data.localidade);
+                            $('#estado').val(data.uf);
+                            $('#numero').focus();
+                        }
+                    });
                 }
-            } else if (cpf.length > 0) {
-                this.classList.add('is-invalid');
-            }
-        });
-        
-        function validarCPF(cpf) {
-            if (cpf == "") return false;
+            });
             
-            // Elimina CPFs invalidos conhecidos    
-            if (cpf.length != 11 || 
-                cpf == "00000000000" || 
-                cpf == "11111111111" || 
-                cpf == "22222222222" || 
-                cpf == "33333333333" || 
-                cpf == "44444444444" || 
-                cpf == "55555555555" || 
-                cpf == "66666666666" || 
-                cpf == "77777777777" || 
-                cpf == "88888888888" || 
-                cpf == "99999999999")
-                return false;
-                
-            // Valida 1o digito    
-            let add = 0;    
-            for (let i = 0; i < 9; i++)
-                add += parseInt(cpf.charAt(i)) * (10 - i);
-            let rev = 11 - (add % 11);
-            if (rev == 10 || rev == 11)
-                rev = 0;
-            if (rev != parseInt(cpf.charAt(9)))
-                return false;
-                
-            // Valida 2o digito
-            add = 0;
-            for (let i = 0; i < 10; i++)
-                add += parseInt(cpf.charAt(i)) * (11 - i);
-            rev = 11 - (add % 11);
-            if (rev == 10 || rev == 11)
-                rev = 0;
-            if (rev != parseInt(cpf.charAt(10)))
-                return false;
-                
-            return true;
-        }
-        
-        // Busca de CEP usando API ViaCEP
-        document.getElementById('buscarCep').addEventListener('click', function() {
-            const cep = document.getElementById('cep').value.replace(/\D/g, '');
+            // Upload de documentos
+            $('#dropzone').click(function() {
+                $('#documento').click();
+            });
             
-            if (cep.length !== 8) {
-                document.getElementById('cep').classList.add('is-invalid');
-                return;
-            }
-            
-            fetch(`https://viacep.com.br/ws/${cep}/json/`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.erro) {
-                        document.getElementById('cep').classList.add('is-invalid');
-                    } else {
-                        document.getElementById('cep').classList.remove('is-invalid');
-                        document.getElementById('logradouro').value = data.logradouro;
-                        document.getElementById('bairro').value = data.bairro;
-                        document.getElementById('cidade').value = data.localidade;
-                        document.getElementById('estado').value = data.uf;
-                        // Foca no campo de número
-                        document.getElementById('numero').focus();
-                    }
-                })
-                .catch(error => {
-                    console.error('Erro ao buscar CEP:', error);
-                    document.getElementById('cep').classList.add('is-invalid');
-                });
-        });
-        
-        // Também busca CEP quando o usuário pressiona Enter no campo
-        document.getElementById('cep').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                document.getElementById('buscarCep').click();
-            }
+            $('#documento').change(function() {
+                const fileName = $(this).val().split('\\').pop();
+                if (fileName) {
+                    $('#dropzone p').text(fileName);
+                } else {
+                    $('#dropzone p').text('Clique para anexar documentos');
+                }
+            });
         });
     </script>
 </body>
